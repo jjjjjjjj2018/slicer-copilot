@@ -8,6 +8,8 @@ import {
   InvalidLlmResponseError,
 } from "./responseValidator.js";
 
+const MAX_COMPLETION_TOKENS = 8192;
+
 /**
  * Call an OpenAI-compatible chat completion endpoint to get an optimization plan.
  *
@@ -84,10 +86,27 @@ async function callChatCompletion({ client, config, messages, logger }) {
   try {
     const completion = await client.chat.completions.create({
       ...buildModelOptions(config),
+      max_completion_tokens: MAX_COMPLETION_TOKENS,
       response_format: LLM_RESPONSE_FORMAT,
       messages,
     });
-    const content = completion.choices?.[0]?.message?.content ?? "";
+    const choice = completion.choices?.[0];
+    const finishReason = choice?.finish_reason ?? completion.stop_reason;
+    if (["length", "max_tokens"].includes(finishReason)) {
+      throw new Error(
+        `LLM response exceeded the ${MAX_COMPLETION_TOKENS}-token output limit. Reduce the request size or use a model with a larger output limit.`,
+      );
+    }
+    const content = extractTextContent(
+      choice?.message?.content ?? completion.content,
+    );
+    if (!content.trim()) {
+      const refusal = choice?.message?.refusal;
+      if (typeof refusal === "string" && refusal.trim()) {
+        throw new Error(`LLM refused the request: ${refusal}`);
+      }
+      throw new Error(buildEmptyContentMessage(config, finishReason));
+    }
     /* c8 ignore next */
     logger?.debug?.("LLM raw response:", content);
     return content;
@@ -95,6 +114,29 @@ async function callChatCompletion({ client, config, messages, logger }) {
     logger?.debug?.(`LLM request failed: ${formatError(error)}`);
     throw new Error(`LLM request failed: ${formatError(error)}`);
   }
+}
+
+function extractTextContent(content) {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content
+    .filter(
+      (part) =>
+        part &&
+        typeof part === "object" &&
+        (part.type === "text" || typeof part.text === "string") &&
+        typeof part.text === "string",
+    )
+    .map((part) => part.text)
+    .join("");
+}
+
+function buildEmptyContentMessage(config, finishReason) {
+  const finishDetail = finishReason ? ` (finish_reason=${finishReason})` : "";
+  if (/^https?:\/\/(?:www\.)?chutes\.ai(?:\/|$)/i.test(config.baseURL ?? "")) {
+    return "LLM returned no text content. Chutes API requests must use https://llm.chutes.ai/v1, not https://chutes.ai. Also choose a model ID from https://llm.chutes.ai/v1/models; claude-opus-5-5 is not in Chutes' public model catalog.";
+  }
+  return `LLM returned no text content${finishDetail}. Verify the configured base URL and that the selected model is available from that provider.`;
 }
 
 function buildUserMessage(payload) {

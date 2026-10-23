@@ -14,7 +14,7 @@ export const LLM_RESPONSE_FORMAT = {
             type: "object",
             additionalProperties: false,
             properties: {
-              scope: { type: ["string", "null"], enum: ["global", "object"] },
+              scope: { type: "string", enum: ["global", "object"] },
               target: {
                 type: "object",
                 additionalProperties: false,
@@ -26,10 +26,7 @@ export const LLM_RESPONSE_FORMAT = {
               },
               parameter: { type: ["string", "null"] },
               newValue: { type: ["string", "number", "boolean", "null"] },
-              changeType: {
-                type: ["string", "null"],
-                enum: ["absolute", "relative"],
-              },
+              changeType: { type: "string", enum: ["absolute", "relative"] },
               reason: { type: ["string", "null"] },
             },
             required: [

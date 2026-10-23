@@ -18,6 +18,15 @@ describe("model request options", () => {
     });
   });
 
+  it("omits temperature for Claude models", () => {
+    expect(
+      buildModelOptions({
+        model: "claude-sonnet-4-5",
+        temperature: 0.3,
+      }),
+    ).toEqual({ model: "claude-sonnet-4-5" });
+  });
+
   it.each(["gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna"])(
     "omits both effort and temperature for the API default of %s",
     (model) => {

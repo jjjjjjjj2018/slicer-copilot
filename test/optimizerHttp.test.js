@@ -35,6 +35,7 @@ describe("optimizer HTTP serialization", () => {
   };
   let server;
   let baseURL;
+  let nextCompletion;
 
   beforeEach(() => {
     vi.stubEnv("OPENAI_REASONING_EFFORT", undefined);
@@ -49,20 +50,22 @@ describe("optimizer HTTP serialization", () => {
       requests.push({ path: request.url, body });
       response.setHeader("Content-Type", "application/json");
       response.end(
-        JSON.stringify({
-          choices: [
-            {
-              message: {
-                content: JSON.stringify({
-                  version: 1,
-                  changes: [],
-                  globalRationale: "fixture",
-                  warnings: [],
-                }),
+        JSON.stringify(
+          nextCompletion ?? {
+            choices: [
+              {
+                message: {
+                  content: JSON.stringify({
+                    version: 1,
+                    changes: [],
+                    globalRationale: "fixture",
+                    warnings: [],
+                  }),
+                },
               },
-            },
-          ],
-        }),
+            ],
+          },
+        ),
       );
     });
     await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -71,14 +74,31 @@ describe("optimizer HTTP serialization", () => {
 
   afterEach(() => {
     requests.length = 0;
+    nextCompletion = undefined;
     vi.unstubAllEnvs();
     vi.restoreAllMocks();
     process.exitCode = 0;
   });
   afterAll(() => new Promise((resolve) => server.close(resolve)));
 
+  it("uses string types for strict-schema enum values", () => {
+    const properties =
+      LLM_RESPONSE_FORMAT.json_schema.schema.properties.changes.items
+        .properties;
+
+    expect(properties.scope).toEqual({
+      type: "string",
+      enum: ["global", "object"],
+    });
+    expect(properties.changeType).toEqual({
+      type: "string",
+      enum: ["absolute", "relative"],
+    });
+  });
+
   it.each([
     ["gpt-4.1-mini", undefined, 0.3],
+    ["claude-sonnet-4-5", undefined, undefined],
     ["gpt-6.1-sol", undefined, undefined],
     ["gpt-6.1-sol", "medium", undefined],
     ["gpt-6-sol", undefined, undefined],
@@ -101,6 +121,7 @@ describe("optimizer HTTP serialization", () => {
       const { body } = requests[0];
       expect(requests[0].path).toBe("/v1/chat/completions");
       expect(body.model).toBe(model);
+      expect(body.max_completion_tokens).toBe(8192);
       if (reasoningEffort === undefined)
         expect(body).not.toHaveProperty("reasoning_effort");
       else expect(body.reasoning_effort).toBe(reasoningEffort);
@@ -131,6 +152,75 @@ describe("optimizer HTTP serialization", () => {
       'Reasoning effort "none" is not supported',
     );
     expect(requests).toHaveLength(0);
+  });
+
+  it("reports when the model truncates its response", async () => {
+    nextCompletion = {
+      choices: [
+        {
+          finish_reason: "length",
+          message: { content: '{"changes":[' },
+        },
+      ],
+    };
+    const config = loadConfig({
+      apiKey: "local-test-dummy",
+      baseURL,
+      model: "claude-sonnet-4-5",
+    });
+
+    await expect(requestOptimization({ payload, config })).rejects.toThrow(
+      "LLM response exceeded the 8192-token output limit",
+    );
+    expect(requests[0].body.max_completion_tokens).toBe(8192);
+  });
+
+  it("parses text blocks returned in message content arrays", async () => {
+    nextCompletion = {
+      choices: [
+        {
+          finish_reason: "stop",
+          message: {
+            content: [
+              { type: "thinking", thinking: "Preparing response" },
+              {
+                type: "text",
+                text: '{"version":1,"changes":[],"globalRationale":"ok","warnings":[]}',
+              },
+            ],
+          },
+        },
+      ],
+    };
+    const config = loadConfig({
+      apiKey: "local-test-dummy",
+      baseURL,
+      model: "claude-sonnet-4-5",
+    });
+
+    await expect(
+      requestOptimization({ payload, config }),
+    ).resolves.toMatchObject({ changes: [], globalRationale: "ok" });
+  });
+
+  it("includes the finish reason when a response contains no text", async () => {
+    nextCompletion = {
+      choices: [
+        {
+          finish_reason: "stop",
+          message: { content: null },
+        },
+      ],
+    };
+    const config = loadConfig({
+      apiKey: "local-test-dummy",
+      baseURL,
+      model: "claude-sonnet-4-5",
+    });
+
+    await expect(requestOptimization({ payload, config })).rejects.toThrow(
+      "LLM returned no text content (finish_reason=stop)",
+    );
   });
 
   it("forwards the CLI option ahead of the environment to the real SDK", async () => {

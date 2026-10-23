@@ -48,6 +48,23 @@ cp .env.example .env
 OPENAI_API_KEY=sk-...
 ```
 
+Claude models can be used through Anthropic's OpenAI SDK compatibility endpoint:
+
+```ini
+OPENAI_API_KEY=your-anthropic-api-key
+OPENAI_BASE_URL=https://api.anthropic.com/v1/
+OPENAI_MODEL=claude-sonnet-4-5
+```
+
+The compatibility endpoint ignores `response_format`; Slicer Copilot still requests strict JSON in its prompt and sets an explicit output-token limit. Claude model requests omit the default temperature parameter.
+
+For Chutes, use its inference API URL and choose a model ID listed by its API:
+
+```ini
+OPENAI_BASE_URL=https://llm.chutes.ai/v1
+OPENAI_MODEL=<model-id-from-https://llm.chutes.ai/v1/models>
+```
+
 **Optional variables:**
 
 ```ini

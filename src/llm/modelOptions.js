@@ -17,6 +17,7 @@ const SUPPORTED_MODELS = new Map([
  */
 export function buildModelOptions({ model, temperature, reasoningEffort }) {
   const supportedEfforts = SUPPORTED_MODELS.get(model);
+  const isClaudeModel = model.toLowerCase().startsWith("claude-");
   if (
     reasoningEffort !== undefined &&
     !supportedEfforts?.includes(reasoningEffort)
@@ -31,7 +32,7 @@ export function buildModelOptions({ model, temperature, reasoningEffort }) {
     options.reasoning_effort = reasoningEffort;
   }
   // These GPT-6 models default to medium reasoning when effort is omitted.
-  if (!supportedEfforts || reasoningEffort === "none") {
+  if ((!supportedEfforts || reasoningEffort === "none") && !isClaudeModel) {
     options.temperature = temperature;
   }
   return options;
